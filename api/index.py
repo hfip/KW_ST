@@ -22,9 +22,9 @@ akwam = AkwamM3u8API()
 
 MANIFEST = {
     "id": "community.abdullah.akwam.addon",
-    "version": "3.5.0",
-    "name": "أكوام الذكي - Akwam Direct",
-    "description": "قنص تلقائي ومباشر لـ 18 سيرفر بث عبر كشط المعرف الصامت وبدون كتالوجات",
+    "version": "3.6.0",
+    "name": "أكوام الذكي - Akwam Proxy Pass",
+    "description": "قنص تلقائي لـ 18 سيرفر بث عبر كشط المعرف بالبروكسي وبدون كتالوجات",
     "resources": ["stream"],
     "types": ["movie", "series"],
     "idPrefixes": ["tt"]
@@ -33,35 +33,35 @@ MANIFEST = {
 def clean_title(title: str) -> str:
     """تنظيف الاسم من الرموز والكلمات الزائدة لتسهيل البحث في أكوام"""
     title = title.lower()
-    # إزالة الكلمات والرموز التي تفسد البحث
     title = re.sub(r'[:\-–,.]', ' ', title)
     title = re.sub(r'\s+', ' ', title).strip()
     return title
 
-def get_media_title_from_imdb_page(imdb_id: str) -> str:
-    """كشط اسم المادة مباشرة وبسرعة من صفحة IMDb وبدون الحاجة لـ API خارجي"""
+def get_media_title_from_imdb_via_proxy(imdb_id: str) -> str:
+    """كشط صفحة IMDb بالكامل عبر وسيط corsproxy لتخطي حظر Render"""
     try:
-        url = f"https://www.imdb.com/title/{imdb_id}/"
+        target_url = f"https://www.imdb.com/title/{imdb_id}/"
+        proxy_url = f"https://corsproxy.io/?{target_url}"
+        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9"
         }
-        print(f"[🔍 Diagnostic] جاري كشط صفحة IMDb للمعرف: {imdb_id}...")
-        response = requests.get(url, headers=headers, timeout=10)
+        print(f"[🔍 Diagnostic] جاري كشط صفحة IMDb عبر البروكسي للمعّرف: {imdb_id}...")
+        response = requests.get(proxy_url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # البحث عن وسم العنوان الرئيسي للصفحة
             title_tag = soup.find('title')
             if title_tag:
                 raw_title = title_tag.text
-                # تنظيف عنوان IMDb (عادة يكتب بصيغة: Movie Name (2023) - IMDb)
-                clean_name = re.sub(r'\s*\(\d{4}\)\s*.*$', '', raw_title) # إزالة السنة وما بعدها
+                # تنظيف عنوان الصفحة لاستخراج اسم الفيلم أو المسلسل الإنجليزي النظيف
+                clean_name = re.sub(r'\s*\(\d{4}\)\s*.*$', '', raw_title)
                 clean_name = clean_name.replace(" - IMDb", "").strip()
-                print(f"[✓ Diagnostic] نجح الكشط المباشر! الاسم هو: '{clean_name}'")
+                print(f"[✓ Diagnostic] نجح الكشط بالبروكسي! الاسم هو: '{clean_name}'")
                 return clean_name
     except Exception as e:
-        print(f"[🚨 Diagnostic Error] فشل كشط الاسم من صفحة IMDb: {e}")
+        print(f"[🚨 Diagnostic Error] فشل الكشط بالبروكسي: {e}")
     return ""
 
 @app.get("/manifest.json")
@@ -81,10 +81,10 @@ async def get_streams(stream_type: str, stream_id: str):
         print(f"\n================ [ بداية فحص طلب البث ] ================")
         print(f"[ℹ️] النوع: {stream_type} | المعرف: {imdb_id} | الموسم: {season} | الحلقة: {episode}")
 
-        # 1. جلب الاسم مباشرة عبر الكشط
-        original_title = get_media_title_from_imdb_page(imdb_id)
+        # 1. جلب الاسم مباشرة عبر كشط IMDb بالبروكسي
+        original_title = get_media_title_from_imdb_via_proxy(imdb_id)
         if not original_title:
-            print("[-] فشل استخراج الاسم من صفحة IMDb. توقف الفحص.")
+            print("[-] فشل استخراج الاسم بالبروكسي. توقف الفحص.")
             print(f"================ [ نهاية فحص طلب البث ] ================\n")
             return Response(content=json.dumps({"streams": []}), media_type="application/json")
 
