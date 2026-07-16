@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 import requests
 import json
 import re
-import base64
 
 app = FastAPI(title="Akwam.Plex Engine")
 
@@ -18,9 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ENCODED_PROXY = "aHR0cHM6Ly9tYm94LXByb3h5LmgtZmlwLndvcmtlcnMuZGV2"
-CF_PROXY = base64.b64decode(ENCODED_PROXY).decode("utf-8")
-
+CF_PROXY = "https://mbox-proxy.h-fip.workers.dev"
 BASE_URL = "https://akwam.it"
 
 MANIFEST = {
