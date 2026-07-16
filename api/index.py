@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from .akwam_api import AkwamM3u8API
-import base64
+import requests
 import json
 
 app = FastAPI(title="Stremio Akwam Addon")
@@ -18,80 +18,65 @@ app.add_middleware(
 
 akwam = AkwamM3u8API()
 
-# المانيفست المحدث لتفعيل ممر البحث والكتالوج الذكي
+# المانيفست الصافي: بدون أي كتالوجات نهائياً لتبقى الواجهة نظيفة 100%
 MANIFEST = {
     "id": "community.abdullah.akwam.addon",
-    "version": "2.1.0",
-    "name": "أكوام المحدث - Akwam HLS",
-    "description": "إضافة أكوام المحدثة لمشاهدة الأفلام والمسلسلات مباشرة عبر سيرفرات التضمين",
-    "resources": ["stream", "catalog"],
+    "version": "3.0.0",
+    "name": "أكوام الذكي - Akwam HLS",
+    "description": "قنص تلقائي لـ 18 سيرفر بث مباشر بمجرد تشغيل الفيلم أو المسلسل من فورد أو ستريمو",
+    "resources": ["stream"],
     "types": ["movie", "series"],
-    "catalogs": [
-        {
-            "type": "movie",
-            "id": "akwam_search_movies",
-            "name": "بحث أكوام - أفلام",
-            "extra": [{"name": "search", "isRequired": True}]
-        },
-        {
-            "type": "series",
-            "id": "akwam_search_series",
-            "name": "بحث أكوام - مسلسلات",
-            "extra": [{"name": "search", "isRequired": True}]
-        }
-    ],
-    "idPrefixes": ["akwam:"]
+    "idPrefixes": ["tt"] # الاستماع لمعرفات IMDB القياسية مباشرة
 }
+
+def get_media_title_from_imdb(imdb_id: str, media_type: str) -> str:
+    """جلب اسم المادة بالإنجليزية صامتاً عبر Cinemeta باستخدام الـ ID"""
+    try:
+        # تحديد المسار المناسب بناءً على نوع المادة (فيلم أو مسلسل)
+        cinemeta_type = "movie" if media_type == "movie" else "series"
+        url = f"https://v3-cinemeta.strem.io/meta/{cinemeta_type}/{imdb_id}.json"
+        
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("meta", {}).get("name", "")
+    except Exception:
+        pass
+    return ""
 
 @app.get("/manifest.json")
 async def get_manifest():
     manifest_json = json.dumps(MANIFEST, ensure_ascii=False, indent=4)
     return Response(content=manifest_json, media_type="application/json; charset=utf-8")
 
-@app.get("/catalog/{catalog_type}/{catalog_id}.json")
-@app.get("/catalog/{catalog_type}/{catalog_id}/search={search_query}.json")
-async def get_catalog(catalog_type: str, catalog_id: str, search_query: str = None):
-    """ممر البحث: يمسح موقع أكوام ويرجع النتائج إلى ستريمو مع تشفير الروابط"""
-    metas = []
-    if search_query:
-        # تحديد نوع البحث بناءً على قسم ستريمو (فيلم أو مسلسل)
-        media_type = 'movie' if catalog_type == 'movie' else 'series'
-        search_results = akwam.search(search_query, media_type=media_type)
-        
-        for item in search_results:
-            # تشفير رابط صفحة أكوام بالكامل داخل الـ ID لتمريره بسلام إلى ممر البث
-            encoded_url = base64.b64encode(item['url'].encode()).decode()
-            metas.append({
-                "id": f"akwam:{encoded_url}",
-                "type": catalog_type,
-                "name": item['name'],
-                "poster": item['poster'],
-                "description": f"شاهد {item['name']} مباشرة عبر سيرفرات أكوام المحدثة"
-            })
-            
-    catalog_json = json.dumps({"metas": metas}, ensure_ascii=False, indent=4)
-    return Response(content=catalog_json, media_type="application/json; charset=utf-8")
-
 @app.get("/stream/{stream_type}/{stream_id}.json")
 async def get_streams(stream_type: str, stream_id: str):
-    """ممر البث: يستقبل الـ ID المشفر، ويفكه، ويقنص الـ 18 سيرفر فوراً"""
+    """ممر البث السحري: يستقبل tt...، يبحث صامتاً، ويقنص السيرفرات فوراً"""
     try:
-        clean_id = stream_id.replace("akwam:", "").replace(".json", "")
+        # استخلاص معرف الـ IMDB الصافي (مثال: tt11003296)
+        imdb_id = stream_id.replace(".json", "")
         
-        # فك تشفير رابط أكوام الأصلي الممرر من الكتالوج
-        try:
-            decoded_url = base64.b64decode(clean_id.encode()).decode("utf-8")
-        except Exception:
-            decoded_url = clean_id
+        # 1. جلب اسم الفيلم أو المسلسل بالإنجليزية تلقائياً
+        media_title = get_media_title_from_imdb(imdb_id, stream_type)
+        if not media_title:
+            return Response(content=json.dumps({"streams": []}), media_type="application/json")
 
-        # إذا كان المنتج مسلسلاً، نقوم بجلب الحلقات أو نمرر الرابط مباشرة للكشط
-        raw_streams = akwam.extract_stream_links(decoded_url)
+        # 2. البحث الصامت عن المادة داخل موقع أكوام عبر البروكسي
+        search_results = akwam.search(media_title, media_type=stream_type)
+        if not search_results:
+            return Response(content=json.dumps({"streams": []}), media_type="application/json")
+        
+        # اختيار النتيجة الأولى المطابقة للدخول لصفحة البث
+        target_page_url = search_results[0]['url']
+
+        # 3. قنص الـ 18 سيرفر حية من خاصية data-link بناءً على تجاربنا المحلية الناجحة
+        raw_streams = akwam.extract_stream_links(target_page_url)
         
         streams = []
         for stream in raw_streams:
             streams.append({
                 "name": stream["title"],
-                "title": f"{stream['title']}\nQuality: Direct Embed",
+                "title": f"{stream['title']}\n🌐 المستضيف: الممر السريع لـ فورد",
                 "url": stream["url"]
             })
             
