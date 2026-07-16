@@ -19,16 +19,13 @@ app.add_middleware(
 
 akwam = AkwamM3u8API()
 
-# مفتاح TMDB الشغال والمجرّب
-TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8"
-
-# رابط البروكسي الخاص بك على كلاود فلير لكسر الحظر وتخطي القيود
+# رابط البروكسي الخاص بك لكسر قيود شبكة Render
 CF_PROXY = "https://mbox-proxy.h-fip.workers.dev"
 
 MANIFEST = {
     "id": "community.abdullah.akwam.addon",
-    "version": "4.0.0",
-    "name": "أكوام السحابي - Akwam CF Proxy",
+    "version": "5.0.0",
+    "name": "أكوام السحابي - Akwam CF",
     "description": "قنص تلقائي لـ 18 سيرفر بث مباشر بالاعتماد على بروكسي كلاود فلير الخاص بـ عبد الله",
     "resources": ["stream"],
     "types": ["movie", "series"],
@@ -36,31 +33,30 @@ MANIFEST = {
 }
 
 def clean_title(title: str) -> str:
-    """تنظيف الاسم من الرموز والكلمات الزائدة لتسهيل البحث في أكوام"""
+    """تنظيف الاسم لتسهيل عملية مطابقة البحث في أكوام"""
     title = title.lower()
     title = re.sub(r'[:\-–,.]', ' ', title)
     title = re.sub(r'\s+', ' ', title).strip()
     return title
 
-def get_media_title_from_tmdb_via_cf(imdb_id: str, media_type: str) -> str:
-    """استرجاع اسم المادة من TMDB عبر تمرير الطلب من خلال بروكسي كلاود فلير الخاص بك"""
+def get_media_title_from_cinemeta_via_cf(imdb_id: str, media_type: str) -> str:
+    """جلب اسم المادة صامتاً من Cinemeta بتمرير الطلب عبر البروكسي الخاص بك"""
     try:
-        # بناء رابط الطلب الأصلي الموجه لـ TMDB
-        target_url = f"api.themoviedb.org/3/find/{imdb_id}?api_key={TMDB_KEY}&external_source=imdb_id"
+        # تحديد المسار المناسب لـ Cinemeta
+        cinemeta_type = "movie" if media_type == "movie" else "series"
+        target_url = f"https://v3-cinemeta.strem.io/meta/{cinemeta_type}/{imdb_id}.json"
         
-        # دمجه مع بروكسي كلاود فلير الخاص بك ليمر الطلب بسلام وبدون قيود
+        # دمج الطلب مع البروكسي الخاص بك
         proxy_request_url = f"{CF_PROXY}/{target_url}"
         
-        print(f"[🔍 Diagnostic] جاري جلب الاسم عبر البروكسي الخاص بك للـ IMDB: {imdb_id}...")
+        print(f"[🔍 Diagnostic] جاري طلب الاسم عبر البروكسي الخاص بك للـ IMDB: {imdb_id}...")
         response = requests.get(proxy_request_url, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
-            results = data.get("movie_results", []) if media_type == "movie" else data.get("tv_results", [])
-            
-            if results:
-                title_en = results[0].get("title") or results[0].get("name") or ""
-                print(f"[✓ Diagnostic] نجح البروكسي الخاص بك! الاسم المسترجع: '{title_en}'")
+            title_en = data.get("meta", {}).get("name", "")
+            if title_en:
+                print(f"[✓ Diagnostic] نجح البروكسي الخاص بك! الاسم المسترجع من Cinemeta هو: '{title_en}'")
                 return title_en
     except Exception as e:
         print(f"[🚨 Diagnostic Error] فشل جلب الاسم عبر بروكسي كلاود فلير: {e}")
@@ -83,10 +79,10 @@ async def get_streams(stream_type: str, stream_id: str):
         print(f"\n================ [ بداية فحص طلب البث ] ================")
         print(f"[ℹ️] النوع: {stream_type} | المعرف: {imdb_id} | الموسم: {season} | الحلقة: {episode}")
 
-        # 1. جلب اسم المادة صامتاً ومحمياً ببروكسي كلاود فلير الخاص بك
-        original_title = get_media_title_from_tmdb_via_cf(imdb_id, stream_type)
+        # 1. جلب الاسم عبر بروكسي كلاود فلير الخاص بك من Cinemeta
+        original_title = get_media_title_from_cinemeta_via_cf(imdb_id, stream_type)
         if not original_title:
-            print("[-] فشل استخراج الاسم عبر كلاود فلير. توقف الفحص.")
+            print("[-] فشل استخراج الاسم عبر البروكسي. توقف الفحص.")
             print(f"================ [ نهاية فحص طلب البث ] ================\n")
             return Response(content=json.dumps({"streams": []}), media_type="application/json")
 
@@ -94,7 +90,7 @@ async def get_streams(stream_type: str, stream_id: str):
         search_query = clean_title(original_title)
         print(f"[🔍] الكلمة المفتاحية للبحث الصامت: '{search_query}'")
 
-        # 3. البحث في أكوام
+        # 3. البحث الصامت في أكوام
         search_results = akwam.search(search_query, media_type=stream_type)
         if not search_results:
             words = search_query.split()
