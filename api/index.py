@@ -3,7 +3,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from .akwam_api import AkwamM3u8API
-from bs4 import BeautifulSoup
 import requests
 import json
 import re
@@ -20,11 +19,17 @@ app.add_middleware(
 
 akwam = AkwamM3u8API()
 
+# مفتاح TMDB الشغال والمجرّب
+TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8"
+
+# رابط البروكسي الخاص بك على كلاود فلير لكسر الحظر وتخطي القيود
+CF_PROXY = "https://mbox-proxy.h-fip.workers.dev"
+
 MANIFEST = {
     "id": "community.abdullah.akwam.addon",
-    "version": "3.6.0",
-    "name": "أكوام الذكي - Akwam Proxy Pass",
-    "description": "قنص تلقائي لـ 18 سيرفر بث عبر كشط المعرف بالبروكسي وبدون كتالوجات",
+    "version": "4.0.0",
+    "name": "أكوام السحابي - Akwam CF Proxy",
+    "description": "قنص تلقائي لـ 18 سيرفر بث مباشر بالاعتماد على بروكسي كلاود فلير الخاص بـ عبد الله",
     "resources": ["stream"],
     "types": ["movie", "series"],
     "idPrefixes": ["tt"]
@@ -37,31 +42,28 @@ def clean_title(title: str) -> str:
     title = re.sub(r'\s+', ' ', title).strip()
     return title
 
-def get_media_title_from_imdb_via_proxy(imdb_id: str) -> str:
-    """كشط صفحة IMDb بالكامل عبر وسيط corsproxy لتخطي حظر Render"""
+def get_media_title_from_tmdb_via_cf(imdb_id: str, media_type: str) -> str:
+    """استرجاع اسم المادة من TMDB عبر تمرير الطلب من خلال بروكسي كلاود فلير الخاص بك"""
     try:
-        target_url = f"https://www.imdb.com/title/{imdb_id}/"
-        proxy_url = f"https://corsproxy.io/?{target_url}"
+        # بناء رابط الطلب الأصلي الموجه لـ TMDB
+        target_url = f"api.themoviedb.org/3/find/{imdb_id}?api_key={TMDB_KEY}&external_source=imdb_id"
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        print(f"[🔍 Diagnostic] جاري كشط صفحة IMDb عبر البروكسي للمعّرف: {imdb_id}...")
-        response = requests.get(proxy_url, headers=headers, timeout=15)
+        # دمجه مع بروكسي كلاود فلير الخاص بك ليمر الطلب بسلام وبدون قيود
+        proxy_request_url = f"{CF_PROXY}/{target_url}"
+        
+        print(f"[🔍 Diagnostic] جاري جلب الاسم عبر البروكسي الخاص بك للـ IMDB: {imdb_id}...")
+        response = requests.get(proxy_request_url, timeout=10)
         
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            title_tag = soup.find('title')
-            if title_tag:
-                raw_title = title_tag.text
-                # تنظيف عنوان الصفحة لاستخراج اسم الفيلم أو المسلسل الإنجليزي النظيف
-                clean_name = re.sub(r'\s*\(\d{4}\)\s*.*$', '', raw_title)
-                clean_name = clean_name.replace(" - IMDb", "").strip()
-                print(f"[✓ Diagnostic] نجح الكشط بالبروكسي! الاسم هو: '{clean_name}'")
-                return clean_name
+            data = response.json()
+            results = data.get("movie_results", []) if media_type == "movie" else data.get("tv_results", [])
+            
+            if results:
+                title_en = results[0].get("title") or results[0].get("name") or ""
+                print(f"[✓ Diagnostic] نجح البروكسي الخاص بك! الاسم المسترجع: '{title_en}'")
+                return title_en
     except Exception as e:
-        print(f"[🚨 Diagnostic Error] فشل الكشط بالبروكسي: {e}")
+        print(f"[🚨 Diagnostic Error] فشل جلب الاسم عبر بروكسي كلاود فلير: {e}")
     return ""
 
 @app.get("/manifest.json")
@@ -81,16 +83,16 @@ async def get_streams(stream_type: str, stream_id: str):
         print(f"\n================ [ بداية فحص طلب البث ] ================")
         print(f"[ℹ️] النوع: {stream_type} | المعرف: {imdb_id} | الموسم: {season} | الحلقة: {episode}")
 
-        # 1. جلب الاسم مباشرة عبر كشط IMDb بالبروكسي
-        original_title = get_media_title_from_imdb_via_proxy(imdb_id)
+        # 1. جلب اسم المادة صامتاً ومحمياً ببروكسي كلاود فلير الخاص بك
+        original_title = get_media_title_from_tmdb_via_cf(imdb_id, stream_type)
         if not original_title:
-            print("[-] فشل استخراج الاسم بالبروكسي. توقف الفحص.")
+            print("[-] فشل استخراج الاسم عبر كلاود فلير. توقف الفحص.")
             print(f"================ [ نهاية فحص طلب البث ] ================\n")
             return Response(content=json.dumps({"streams": []}), media_type="application/json")
 
         # 2. تنظيف كلمة البحث
         search_query = clean_title(original_title)
-        print(f"[🔍] الكلمة المفتاحية للبحث: '{search_query}'")
+        print(f"[🔍] الكلمة المفتاحية للبحث الصامت: '{search_query}'")
 
         # 3. البحث في أكوام
         search_results = akwam.search(search_query, media_type=stream_type)
@@ -107,7 +109,7 @@ async def get_streams(stream_type: str, stream_id: str):
             return Response(content=json.dumps({"streams": []}), media_type="application/json")
 
         target_page_url = search_results[0]['url']
-        print(f"[🎯] رابط صفحة أكوام المكتشفة: {target_page_url}")
+        print(f"[🎯] رابط صفحة أكوام المستهدفة: {target_page_url}")
 
         if stream_type == "series":
             episodes = akwam.get_episodes(target_page_url)
